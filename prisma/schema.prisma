@@ -1,0 +1,86 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Employee {
+  id                String               @id @default(uuid())
+  name              String
+  phone             String               @unique
+  registeredAt      DateTime             @default(now())
+  embeddings        FaceEmbedding[]
+  attendance        Attendance[]
+  verificationSelfies VerificationSelfie[]
+}
+
+model FaceEmbedding {
+  id          String   @id @default(uuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  embedding   String   // Store stringified JSON float array
+  createdAt   DateTime @default(now())
+}
+
+model Attendance {
+  id           String    @id @default(uuid())
+  employeeId   String
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date         String    // YYYY-MM-DD
+  punchIn      DateTime?
+  punchOut     DateTime?
+  status       String    // "Present" | "Absent" | "Holiday" | "Sunday"
+  punchInLat   Float?
+  punchInLng   Float?
+  punchOutLat  Float?
+  punchOutLng  Float?
+  deviceInfo   String?
+  browserInfo  String?
+}
+
+model VerificationSelfie {
+  id          String   @id @default(uuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  imageBytes  String   // Store base64 data string
+  timestamp   DateTime @default(now())
+  latitude    Float
+  longitude   Float
+  gpsAccuracy Float
+  type        String   // "IN" | "OUT"
+}
+
+model Admin {
+  id           String @id @default(uuid())
+  username     String @unique
+  passwordHash String
+  role         String @default("ADMIN")
+}
+
+model Settings {
+  id                         String  @id @default("global_settings")
+  officeName                 String  @default("AttendX HQ")
+  latitude                   Float   @default(21.125184)
+  longitude                  Float   @default(79.063881)
+  radiusMeters               Float   @default(50.0)
+  minHoursBeforePunchOut    Float   @default(8.0)
+  logoUrl                    String?
+  companyInfo                String?
+}
+
+model HolidayCache {
+  id   String @id @default(uuid())
+  date String @unique // YYYY-MM-DD
+  name String
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  action      String
+  performedBy String
+  timestamp   DateTime @default(now())
+  details     String?
+}
