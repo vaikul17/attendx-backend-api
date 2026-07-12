@@ -378,7 +378,7 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
       left: { style: 'thin', color: { argb: 'D3D3D3' } },
       bottom: { style: 'thin', color: { argb: 'D3D3D3' } },
       right: { style: 'thin', color: { argb: 'D3D3D3' } },
-    };
+    } as const;
 
     // Header row background fill (Light gray)
     headerRow.eachCell((cell) => {
