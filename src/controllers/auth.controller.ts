@@ -4,7 +4,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 
 const prisma = new PrismaClient();
-const FACE_SERVICE_URL = process.env.FACE_SERVICE_URL || 'http://face_service:8000';
+const FACE_SERVICE_URL = (process.env.FACE_SERVICE_URL || 'http://face_service:8000').replace(/\/$/, '');
 
 // Haversine Distance helper
 export function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
