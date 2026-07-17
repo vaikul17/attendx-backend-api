@@ -40,6 +40,16 @@ export async function checkRegistration(req: Request, res: Response) {
   }
 }
 
+// Pre-warm Face AI microservice background ping
+export async function prewarm(req: Request, res: Response) {
+  try {
+    axios.get(`${FACE_SERVICE_URL}/`, { timeout: 8000 }).catch(() => {});
+    return res.json({ status: 'prewarming' });
+  } catch (err) {
+    return res.json({ status: 'ignored' });
+  }
+}
+
 // 2. Perform Biometric + Profile Registration
 export async function register(req: Request, res: Response) {
   const { name, phone } = req.body;
@@ -69,6 +79,7 @@ export async function register(req: Request, res: Response) {
 
     const response = await axios.post(`${FACE_SERVICE_URL}/embed`, form, {
       headers: form.getHeaders(),
+      timeout: 60000, // Wait up to 60s for Render free-tier cold starts
     });
 
     const embedding: number[] = response.data.embedding;
@@ -164,6 +175,7 @@ export async function login(req: Request, res: Response) {
 
     const embedResponse = await axios.post(`${FACE_SERVICE_URL}/embed`, form, {
       headers: form.getHeaders(),
+      timeout: 60000, // Wait up to 60s for Render free-tier cold starts
     });
 
     const scannedEmbedding: number[] = embedResponse.data.embedding;
@@ -181,6 +193,7 @@ export async function login(req: Request, res: Response) {
 
     const matchResponse = await axios.post(`${FACE_SERVICE_URL}/match`, matchForm, {
       headers: matchForm.getHeaders(),
+      timeout: 60000, // Wait up to 60s for Render free-tier cold starts
     });
 
     const { match, employeeId, confidence } = matchResponse.data;
