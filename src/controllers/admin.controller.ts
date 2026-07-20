@@ -319,11 +319,56 @@ export async function saveGeofenceSettings(req: Request, res: Response) {
   }
 }
 
-// 10. Generate and Export Excel Workbook Sheet (ExcelJS) Match Image Format
+// 11. Change Admin Secret Code (Security Settings)
+export async function changeAdminSecretCode(req: Request, res: Response) {
+  const { currentSecretCode, newSecretCode } = req.body;
+
+  if (!currentSecretCode || !newSecretCode) {
+    return res.status(400).json({ error: 'Current and new secret codes are required.' });
+  }
+
+  if (String(newSecretCode).trim().length < 4) {
+    return res.status(400).json({ error: 'New secret code must be at least 4 characters long.' });
+  }
+
+  try {
+    const admin = await prisma.admin.findFirst();
+    if (!admin) {
+      return res.status(404).json({ error: 'Admin user not found.' });
+    }
+
+    if (admin.secretCodeHash) {
+      const isMatch = await bcrypt.compare(String(currentSecretCode).trim(), admin.secretCodeHash);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Current secret code is incorrect.' });
+      }
+    }
+
+    const newHash = await bcrypt.hash(String(newSecretCode).trim(), 10);
+    await prisma.admin.update({
+      where: { id: admin.id },
+      data: { secretCodeHash: newHash },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'CHANGE_ADMIN_SECRET_CODE',
+        performedBy: admin.username,
+        details: 'Admin secret code successfully updated.',
+      },
+    });
+
+    return res.json({ message: 'Admin Secret Code updated successfully.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to update Secret Code: ' + (err.message || err) });
+  }
+}
+
+// 10. Generate and Export Excel Workbook Sheet (ExcelJS) for NSM & Associates
 export async function exportAttendanceExcel(req: Request, res: Response) {
   try {
     const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('June Attendance');
+    const sheet = workbook.addWorksheet('Attendance Register');
 
     const now = new Date();
     const currentMonth = now.getMonth(); // 0-11
@@ -331,43 +376,42 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
     const monthNameLong = now.toLocaleString('en-US', { month: 'long' });
 
-    // 1. Build Large Header Blocks
-    sheet.addRow(['NSM & ASSOCIATES — ATTENDANCE GRID']);
+    // 1. Build Title & Header Blocks
+    sheet.addRow(['NSM & ASSOCIATES — ATTENDANCE REGISTER']);
     sheet.addRow([`Month: ${monthNameLong} ${currentYear}`]);
     sheet.addRow([]); // Blank Row 3
 
-    // Apply styles to Header Rows
     sheet.getRow(1).font = { name: 'Calibri', size: 14, bold: true, color: { argb: '000000' } };
     sheet.getRow(2).font = { name: 'Calibri', size: 10, italic: true, color: { argb: '595959' } };
 
-    // 2. Prepare Row 4 Table Headers
-    const headers: string[] = ['ID', 'Name'];
+    // 2. Prepare Row 4 Table Headers (No Employee ID column!)
+    const headers: string[] = ['Name', 'Phone Number'];
     const columns: any[] = [
-      { key: 'empId', width: 14 },
-      { key: 'name', width: 22 }
+      { key: 'name', width: 22 },
+      { key: 'phone', width: 16 },
     ];
 
     for (let day = 1; day <= daysInMonth; day++) {
       const checkDate = new Date(currentYear, currentMonth, day);
       const dayName = checkDate.getDate();
       const monthNameShort = checkDate.toLocaleString('en-US', { month: 'short' });
-      
-      headers.push(`${dayName} ${monthNameShort}`, 'In', 'Out');
-      
-      columns.push({ key: `d${day}_status`, width: 12 });
-      columns.push({ key: `d${day}_in`, width: 12 });
-      columns.push({ key: `d${day}_out`, width: 12 });
+
+      headers.push(`${dayName} ${monthNameShort}`, 'In', 'Out', 'Hours');
+
+      columns.push({ key: `d${day}_status`, width: 10 });
+      columns.push({ key: `d${day}_in`, width: 11 });
+      columns.push({ key: `d${day}_out`, width: 11 });
+      columns.push({ key: `d${day}_hours`, width: 11 });
     }
 
-    headers.push('Present', 'Absent');
-    columns.push({ key: 'total_present', width: 12 });
-    columns.push({ key: 'total_absent', width: 12 });
+    headers.push('Present Days', 'Absent Days', 'Total Hours');
+    columns.push({ key: 'total_present', width: 13 });
+    columns.push({ key: 'total_absent', width: 13 });
+    columns.push({ key: 'total_working_hours', width: 14 });
 
-    // Add headers as Row 4
     sheet.addRow(headers);
     sheet.columns = columns;
 
-    // Format Header Row (Row 4)
     const headerRow = sheet.getRow(4);
     headerRow.height = 24;
     headerRow.font = { name: 'Calibri', size: 11, bold: true, color: { argb: '000000' } };
@@ -380,7 +424,6 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
       right: { style: 'thin', color: { argb: 'D3D3D3' } },
     } as const;
 
-    // Header row background fill (Light gray)
     headerRow.eachCell((cell) => {
       cell.fill = {
         type: 'pattern',
@@ -390,9 +433,10 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
       cell.border = thinBorder;
     });
 
-    // 3. Query Attendance database
+    // 3. Query Attendance Database
     const currentMonthStr = `${currentYear}-${(currentMonth + 1).toString().padStart(2, '0')}`;
     const employees = await prisma.employee.findMany({
+      where: { active: true },
       include: {
         attendance: {
           where: {
@@ -402,17 +446,20 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
           },
         },
       },
+      orderBy: { name: 'asc' },
     });
 
-    employees.forEach((emp, empIdx) => {
+    employees.forEach((emp) => {
       const rowData: any = {
-        empId: `EMP-${emp.phone.slice(-4)}`, // Format like EMP-1002
         name: emp.name,
+        phone: emp.phone,
       };
-      
+
       let presentCount = 0;
-      let absentCount = 0;      // Group records by day (timezone-safe date mapping from DB logs)
-      const dailyMap: { [key: number]: typeof emp.attendance[0] } = {};
+      let absentCount = 0;
+      let totalWorkMs = 0;
+
+      const dailyMap: { [key: number]: (typeof emp.attendance)[0] } = {};
       emp.attendance.forEach((att) => {
         const dayParts = att.date.split('-');
         const dayNum = parseInt(dayParts[2], 10);
@@ -427,52 +474,69 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
         const record = dailyMap[day];
         const checkDate = new Date(currentYear, currentMonth, day);
         const isSunday = checkDate.getDay() === 0;
-        const isPastDay = !isCurrentMonth || (day < todayDayNum);
+        const isPastDay = !isCurrentMonth || day < todayDayNum;
 
         if (record && record.punchIn) {
           const checkIn = new Date(record.punchIn);
-
-          // Time format standard: "10:01 AM"
-          const formatTime = (dateObj: Date) => {
-            return dateObj.toLocaleTimeString('en-US', {
+          const formatTime = (dateObj: Date) =>
+            dateObj.toLocaleTimeString('en-US', {
               hour: '2-digit',
               minute: '2-digit',
-              hour12: true
+              hour12: true,
             });
-          };
 
           rowData[`d${day}_in`] = formatTime(checkIn);
-          rowData[`d${day}_out`] = record.punchOut ? formatTime(new Date(record.punchOut)) : '-';
-          rowData[`d${day}_status`] = 'P'; // Only Present (P)
+
+          if (record.punchOut) {
+            const checkOut = new Date(record.punchOut);
+            rowData[`d${day}_out`] = formatTime(checkOut);
+            const durationMs = checkOut.getTime() - checkIn.getTime();
+            if (durationMs > 0) {
+              totalWorkMs += durationMs;
+              const hrs = (durationMs / (1000 * 60 * 60)).toFixed(1);
+              rowData[`d${day}_hours`] = `${hrs} hrs`;
+            } else {
+              rowData[`d${day}_hours`] = '-';
+            }
+          } else {
+            rowData[`d${day}_out`] = '-';
+            rowData[`d${day}_hours`] = '-';
+          }
+
+          rowData[`d${day}_status`] = 'P';
           presentCount++;
         } else {
-          // If no record exists
-          if (isSunday || isPastDay) {
-            rowData[`d${day}_status`] = 'A'; // Only Absent (A)
+          if (isSunday) {
+            rowData[`d${day}_status`] = 'SUN';
             rowData[`d${day}_in`] = '-';
             rowData[`d${day}_out`] = '-';
+            rowData[`d${day}_hours`] = '-';
+          } else if (isPastDay) {
+            rowData[`d${day}_status`] = 'A';
+            rowData[`d${day}_in`] = '-';
+            rowData[`d${day}_out`] = '-';
+            rowData[`d${day}_hours`] = '-';
             absentCount++;
           } else {
-            // Future / Current remaining days: blank status
             rowData[`d${day}_status`] = '-';
             rowData[`d${day}_in`] = '-';
             rowData[`d${day}_out`] = '-';
+            rowData[`d${day}_hours`] = '-';
           }
         }
       }
 
       rowData['total_present'] = presentCount;
       rowData['total_absent'] = absentCount;
+      rowData['total_working_hours'] = `${(totalWorkMs / (1000 * 60 * 60)).toFixed(1)} hrs`;
 
       const newRow = sheet.addRow(rowData);
       newRow.height = 20;
 
-      // Apply cell formatting (alignment, border, and fills)
       newRow.eachCell((cell, colNumber) => {
         cell.border = thinBorder;
         cell.font = { name: 'Calibri', size: 11 };
 
-        // Left-align ID and Name, center-align the rest
         if (colNumber === 1 || colNumber === 2) {
           cell.alignment = { vertical: 'middle', horizontal: 'left' };
         } else {
@@ -480,14 +544,13 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
         }
       });
 
-      // Status columns colors formatting (P and A only)
+      // Status cell formatting
       for (let day = 1; day <= daysInMonth; day++) {
-        const colIdx = 3 + (day - 1) * 3; // Status column index
+        const colIdx = 3 + (day - 1) * 4;
         const statusCell = newRow.getCell(colIdx);
         const val = statusCell.value;
 
         if (val === 'P') {
-          // Present: Light Green fill
           statusCell.fill = {
             type: 'pattern',
             pattern: 'solid',
@@ -495,18 +558,23 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
           };
           statusCell.font = { name: 'Calibri', color: { argb: '006100' }, bold: true };
         } else if (val === 'A') {
-          // Absent: Light Red fill
           statusCell.fill = {
             type: 'pattern',
             pattern: 'solid',
             fgColor: { argb: 'FFC7CE' },
           };
           statusCell.font = { name: 'Calibri', color: { argb: '9C0006' }, bold: true };
+        } else if (val === 'SUN') {
+          statusCell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFEB9C' },
+          };
+          statusCell.font = { name: 'Calibri', color: { argb: '9C6500' }, bold: true };
         }
       }
     });
 
-    // Write headers and return sheet download response stream
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -523,3 +591,4 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
     return res.status(500).json({ error: 'Failed to generate Excel report: ' + err });
   }
 }
+

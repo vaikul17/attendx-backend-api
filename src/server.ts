@@ -45,16 +45,30 @@ async function seedData() {
 
     // 2. Seed default admin account
     const adminCount = await prisma.admin.count();
+    const defaultSecret = process.env.ADMIN_SECRET_CODE || 'admin123';
+    const secretHash = await bcrypt.hash(defaultSecret, 10);
+    const passHash = await bcrypt.hash('admin123', 10);
+
     if (adminCount === 0) {
-      const hash = await bcrypt.hash('admin123', 10);
       await prisma.admin.create({
         data: {
           username: 'admin',
-          passwordHash: hash,
+          passwordHash: passHash,
+          secretCodeHash: secretHash,
           role: 'ADMIN',
         },
       });
-      console.log('[SEED] Admin user seeded (username: admin, password: admin123).');
+      console.log('[SEED] Admin user seeded with Secret Code.');
+    } else {
+      // Ensure existing admin record has secretCodeHash set
+      const admin = await prisma.admin.findFirst();
+      if (admin && (!admin.secretCodeHash || admin.secretCodeHash === '')) {
+        await prisma.admin.update({
+          where: { id: admin.id },
+          data: { secretCodeHash: secretHash },
+        });
+        console.log('[SEED] Updated existing admin with Secret Code hash.');
+      }
     }
   } catch (err) {
     console.error('[SEED ERROR] Seeding aborted: ', err);

@@ -11,6 +11,7 @@ model Employee {
   id                String               @id @default(uuid())
   name              String
   phone             String               @unique
+  active            Boolean              @default(true)
   registeredAt      DateTime             @default(now())
   embeddings        FaceEmbedding[]
   attendance        Attendance[]
@@ -23,6 +24,8 @@ model FaceEmbedding {
   employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   embedding   String   // Store stringified JSON float array
   createdAt   DateTime @default(now())
+
+  @@index([employeeId])
 }
 
 model Attendance {
@@ -39,6 +42,10 @@ model Attendance {
   punchOutLng  Float?
   deviceInfo   String?
   browserInfo  String?
+
+  @@unique([employeeId, date])
+  @@index([employeeId])
+  @@index([date])
 }
 
 model VerificationSelfie {
@@ -51,13 +58,17 @@ model VerificationSelfie {
   longitude   Float
   gpsAccuracy Float
   type        String   // "IN" | "OUT"
+
+  @@index([employeeId])
 }
 
 model Admin {
-  id           String @id @default(uuid())
-  username     String @unique
-  passwordHash String
-  role         String @default("ADMIN")
+  id             String   @id @default(uuid())
+  username       String   @unique
+  passwordHash   String
+  secretCodeHash String   @default("")
+  role           String   @default("ADMIN")
+  updatedAt      DateTime @default(now()) @updatedAt
 }
 
 model Settings {

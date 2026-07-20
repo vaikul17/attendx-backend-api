@@ -11,7 +11,8 @@ import {
   getGeofenceSettings,
   saveGeofenceSettings,
   exportAttendanceExcel,
-  getSelfieRecord
+  getSelfieRecord,
+  changeAdminSecretCode,
 } from '../controllers/admin.controller';
 
 const router = Router();
@@ -29,6 +30,7 @@ router.post('/attendance/adjust', verifyAdminToken, adjustAttendanceLog);
 router.get('/settings', verifyAdminToken, getGeofenceSettings);
 router.post('/settings', verifyAdminToken, saveGeofenceSettings);
 router.get('/selfie/:id', verifyAdminToken, getSelfieRecord);
+router.post('/change-secret-code', verifyAdminToken, changeAdminSecretCode);
 
 // Excel Export is protected
 router.get('/attendance/export', verifyAdminToken, exportAttendanceExcel);
