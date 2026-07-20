@@ -5,6 +5,23 @@ import jwt from 'jsonwebtoken';
 import ExcelJS from 'exceljs';
 
 const prisma = new PrismaClient();
+const IST_TIMEZONE = 'Asia/Kolkata';
+
+// Helper: Get current date string in IST (YYYY-MM-DD)
+function getISTDateStr(date?: Date): string {
+  const d = date || new Date();
+  return d.toLocaleDateString('en-CA', { timeZone: IST_TIMEZONE });
+}
+
+// Helper: Format a Date to IST time string (e.g. "09:30 AM")
+function formatISTTime(dateObj: Date): string {
+  return dateObj.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: IST_TIMEZONE,
+  });
+}
 
 // 1. Admin Login API
 export async function loginAdmin(req: Request, res: Response) {
@@ -40,7 +57,7 @@ export async function getDashboardStats(req: Request, res: Response) {
   try {
     const totalEmployees = await prisma.employee.count();
     
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getISTDateStr();
     const todayAttendance = await prisma.attendance.findMany({
       where: { date: todayStr },
     });
@@ -57,13 +74,13 @@ export async function getDashboardStats(req: Request, res: Response) {
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = getISTDateStr(d);
       
       const count = await prisma.attendance.count({
         where: { date: dateStr, status: 'Present' },
       });
       
-      const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: IST_TIMEZONE });
       weeklyData.push({ day: dayName, count });
     }
 
@@ -371,10 +388,13 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
     const sheet = workbook.addWorksheet('Attendance Register');
 
     const now = new Date();
-    const currentMonth = now.getMonth(); // 0-11
-    const currentYear = now.getFullYear();
+    // Use IST timezone for month/year calculations
+    const istNowStr = now.toLocaleDateString('en-CA', { timeZone: IST_TIMEZONE });
+    const [istYear, istMonthStr] = istNowStr.split('-');
+    const currentYear = parseInt(istYear, 10);
+    const currentMonth = parseInt(istMonthStr, 10) - 1; // 0-11
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-    const monthNameLong = now.toLocaleString('en-US', { month: 'long' });
+    const monthNameLong = now.toLocaleString('en-US', { month: 'long', timeZone: IST_TIMEZONE });
 
     // 1. Build Title & Header Blocks
     sheet.addRow(['NSM & ASSOCIATES — ATTENDANCE REGISTER']);
@@ -466,9 +486,13 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
         dailyMap[dayNum] = att;
       });
 
-      const today = new Date();
-      const isCurrentMonth = currentMonth === today.getMonth() && currentYear === today.getFullYear();
-      const todayDayNum = today.getDate();
+      // Use IST date for today's day number
+      const todayIST = getISTDateStr();
+      const todayParts = todayIST.split('-');
+      const todayYearIST = parseInt(todayParts[0], 10);
+      const todayMonthIST = parseInt(todayParts[1], 10) - 1;
+      const todayDayNum = parseInt(todayParts[2], 10);
+      const isCurrentMonth = currentMonth === todayMonthIST && currentYear === todayYearIST;
 
       for (let day = 1; day <= daysInMonth; day++) {
         const record = dailyMap[day];
@@ -478,18 +502,12 @@ export async function exportAttendanceExcel(req: Request, res: Response) {
 
         if (record && record.punchIn) {
           const checkIn = new Date(record.punchIn);
-          const formatTime = (dateObj: Date) =>
-            dateObj.toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit',
-              hour12: true,
-            });
 
-          rowData[`d${day}_in`] = formatTime(checkIn);
+          rowData[`d${day}_in`] = formatISTTime(checkIn);
 
           if (record.punchOut) {
             const checkOut = new Date(record.punchOut);
-            rowData[`d${day}_out`] = formatTime(checkOut);
+            rowData[`d${day}_out`] = formatISTTime(checkOut);
             const durationMs = checkOut.getTime() - checkIn.getTime();
             if (durationMs > 0) {
               totalWorkMs += durationMs;

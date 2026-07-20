@@ -2,6 +2,11 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+const IST_TIMEZONE = 'Asia/Kolkata';
+
+function getISTDateStr(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: IST_TIMEZONE });
+}
 
 // 1. Perform Punch In
 export async function punchIn(req: Request, res: Response) {
@@ -17,7 +22,7 @@ export async function punchIn(req: Request, res: Response) {
     const accuracy = parseFloat(gpsAccuracy || '10.0');
     
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
+    const todayStr = getISTDateStr();
 
     // Check duplicate punch-in
     const existing = await prisma.attendance.findFirst({
@@ -91,7 +96,7 @@ export async function punchOut(req: Request, res: Response) {
     const accuracy = parseFloat(gpsAccuracy || '10.0');
 
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
+    const todayStr = getISTDateStr();
 
     const attendance = await prisma.attendance.findFirst({
       where: { employeeId, date: todayStr },
