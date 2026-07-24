@@ -56,7 +56,7 @@ export async function loginAdmin(req: Request, res: Response) {
 export async function getDashboardStats(req: Request, res: Response) {
   try {
     const totalEmployees = await prisma.employee.count();
-    
+
     const todayStr = getISTDateStr();
     const todayAttendance = await prisma.attendance.findMany({
       where: { date: todayStr },
@@ -65,7 +65,7 @@ export async function getDashboardStats(req: Request, res: Response) {
     const presentToday = todayAttendance.filter((l) => l.status === 'Present').length;
     const absentToday = todayAttendance.filter((l) => l.status === 'Absent').length;
     const pendingPunchOuts = todayAttendance.filter((l) => l.punchIn && !l.punchOut).length;
-    
+
     const attendancePercentage =
       totalEmployees > 0 ? Math.round((presentToday / totalEmployees) * 100) : 100;
 
@@ -75,11 +75,11 @@ export async function getDashboardStats(req: Request, res: Response) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dateStr = getISTDateStr(d);
-      
+
       const count = await prisma.attendance.count({
         where: { date: dateStr, status: 'Present' },
       });
-      
+
       const dayName = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: IST_TIMEZONE });
       weeklyData.push({ day: dayName, count });
     }
@@ -109,11 +109,11 @@ export async function getEmployeesList(req: Request, res: Response) {
     const employees = await prisma.employee.findMany({
       where: search
         ? {
-            OR: [
-              { name: { contains: String(search), mode: 'insensitive' } },
-              { phone: { contains: String(search) } },
-            ],
-          }
+          OR: [
+            { name: { contains: String(search), mode: 'insensitive' } },
+            { phone: { contains: String(search) } },
+          ],
+        }
         : {},
       include: {
         embeddings: true,
@@ -140,7 +140,7 @@ export async function deleteEmployee(req: Request, res: Response) {
   const { id } = req.params;
   try {
     await prisma.employee.delete({ where: { id } });
-    
+
     // Log action in Audit log
     await prisma.auditLog.create({
       data: {
@@ -179,29 +179,61 @@ export async function resetFaceEmbeddings(req: Request, res: Response) {
   }
 }
 
-// 6. Fetch Logs with Selfie Info
+// 6. Fetch Logs with Selfie Info (supports ?date=YYYY-MM-DD and ?sort=name)
 export async function getAttendanceLogs(req: Request, res: Response) {
   try {
+    const { date, sort } = req.query;
+    const filterDate = date ? String(date) : getISTDateStr(); // Default to today
+
     const logs = await prisma.attendance.findMany({
+      where: { date: filterDate },
       include: {
         employee: true,
       },
-      orderBy: { date: 'desc' },
-      take: 200,
+      orderBy: sort === 'name' 
+        ? { employee: { name: 'asc' } } 
+        : { date: 'desc' },
+      take: 500,
     });
 
-    // Match verification selfies
+    // Match verification selfies using a ±5 minute time window
+    const SELFIE_MATCH_WINDOW_MS = 5 * 60 * 1000; // 5 minutes tolerance
+
     const result = await Promise.all(
       logs.map(async (log) => {
-        const punchInSelfie = await prisma.verificationSelfie.findFirst({
-          where: { employeeId: log.employeeId, timestamp: log.punchIn || undefined, type: 'IN' },
-          select: { id: true, gpsAccuracy: true },
-        });
+        let punchInSelfie = null;
+        if (log.punchIn) {
+          const punchInTime = new Date(log.punchIn);
+          punchInSelfie = await prisma.verificationSelfie.findFirst({
+            where: {
+              employeeId: log.employeeId,
+              type: 'IN',
+              timestamp: {
+                gte: new Date(punchInTime.getTime() - SELFIE_MATCH_WINDOW_MS),
+                lte: new Date(punchInTime.getTime() + SELFIE_MATCH_WINDOW_MS),
+              },
+            },
+            select: { id: true, gpsAccuracy: true },
+            orderBy: { timestamp: 'desc' },
+          });
+        }
 
-        const punchOutSelfie = await prisma.verificationSelfie.findFirst({
-          where: { employeeId: log.employeeId, timestamp: log.punchOut || undefined, type: 'OUT' },
-          select: { id: true, gpsAccuracy: true },
-        });
+        let punchOutSelfie = null;
+        if (log.punchOut) {
+          const punchOutTime = new Date(log.punchOut);
+          punchOutSelfie = await prisma.verificationSelfie.findFirst({
+            where: {
+              employeeId: log.employeeId,
+              type: 'OUT',
+              timestamp: {
+                gte: new Date(punchOutTime.getTime() - SELFIE_MATCH_WINDOW_MS),
+                lte: new Date(punchOutTime.getTime() + SELFIE_MATCH_WINDOW_MS),
+              },
+            },
+            select: { id: true, gpsAccuracy: true },
+            orderBy: { timestamp: 'desc' },
+          });
+        }
 
         return {
           id: log.id,
@@ -262,7 +294,7 @@ export async function adjustAttendanceLog(req: Request, res: Response) {
       where: { id },
       include: { employee: true },
     });
-    
+
     if (!existing) {
       return res.status(404).json({ error: 'Log record not found.' });
     }

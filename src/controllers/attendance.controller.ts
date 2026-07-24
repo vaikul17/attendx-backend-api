@@ -8,6 +8,11 @@ function getISTDateStr(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: IST_TIMEZONE });
 }
 
+function getISTHour(): number {
+  const hourStr = new Date().toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: IST_TIMEZONE });
+  return parseInt(hourStr, 10);
+}
+
 // 1. Perform Punch In
 export async function punchIn(req: Request, res: Response) {
   const { employeeId, latitude, longitude, gpsAccuracy, selfieBase64, deviceInfo, browserInfo } = req.body;
@@ -21,6 +26,12 @@ export async function punchIn(req: Request, res: Response) {
     const lng = parseFloat(longitude);
     const accuracy = parseFloat(gpsAccuracy || '10.0');
     
+    // Block punch-in after 5:00 PM IST
+    const currentISTHour = getISTHour();
+    if (currentISTHour >= 17) {
+      return res.status(400).json({ error: 'Punch-In is locked after 5:00 PM. You have been marked Absent for today.' });
+    }
+
     const now = new Date();
     const todayStr = getISTDateStr();
 
